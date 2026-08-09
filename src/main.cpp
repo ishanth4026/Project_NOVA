@@ -1,70 +1,54 @@
 #include <Arduino.h>
-#include <SPI.h>
-#include <SD.h>
+#include <GxEPD2_BW.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
 
-// LILYGO T3-S3 TF card pins
-#define SD_CS    13
-#define SD_MOSI  11
-#define SD_MISO  2
-#define SD_SCK   14
+// LILYGO T3-S3 H727
+#define EPD_CS    15
+#define EPD_DC    16
+#define EPD_RST   47
+#define EPD_BUSY  48
 
-SPIClass sdSPI(FSPI);
+// 2.13" 250x122 display
+GxEPD2_BW<GxEPD2_213_B74, GxEPD2_213_B74::HEIGHT> display(
+    GxEPD2_213_B74(
+        EPD_CS,
+        EPD_DC,
+        EPD_RST,
+        EPD_BUSY
+    )
+);
 
-void setup() {
+void setup()
+{
     Serial.begin(115200);
-    delay(3000);
+    delay(2000);
 
-    Serial.println("NOVA starting...");
+    Serial.println("NOVA E-PAPER TEST");
 
-    // Start SPI
-    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    display.init(115200);
 
-    // Initialize SD card
-    if (!SD.begin(SD_CS, sdSPI)) {
-        Serial.println("SD card initialization failed!");
-        return;
-    }
+    display.setRotation(1);
+    display.setFont(&FreeMonoBold9pt7b);
+    display.setTextColor(GxEPD_BLACK);
 
-    Serial.println("SD card initialized.");
+    display.setFullWindow();
+    display.firstPage();
 
-    // Check whether tasks.json already exists
-    if (SD.exists("/tasks.json")) {
-        Serial.println("tasks.json already exists.");
-        Serial.println("Leaving existing tasks untouched.");
-        return;
-    }
+    do
+    {
+        display.fillScreen(GxEPD_WHITE);
 
-    // File doesn't exist, so create it
-    Serial.println("tasks.json does not exist.");
-    Serial.println("Creating tasks.json...");
+        display.setCursor(20, 45);
+        display.print("PROJECT NOVA");
 
-    File file = SD.open("/tasks.json", FILE_WRITE);
+        display.setCursor(20, 75);
+        display.print("DISPLAY WORKS!");
 
-    if (!file) {
-        Serial.println("Could not create tasks.json");
-        return;
-    }
+    } while (display.nextPage());
 
-    file.println("{");
-    file.println("  \"tasks\": [");
-
-    file.println("    {");
-    file.println("      \"title\": \"Finish NOVA project\",");
-    file.println("      \"completed\": false");
-    file.println("    },");
-
-    file.println("    {");
-    file.println("      \"title\": \"Study physics\",");
-    file.println("      \"completed\": false");
-    file.println("    }");
-
-    file.println("  ]");
-    file.println("}");
-
-    file.close();
-
-    Serial.println("tasks.json created successfully!");
+    Serial.println("Display update complete.");
 }
 
-void loop() {
+void loop()
+{
 }
