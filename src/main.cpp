@@ -12,89 +12,58 @@ SPIClass sdSPI(FSPI);
 
 void setup() {
     Serial.begin(115200);
-    delay(2000);
+    delay(3000);
 
-    Serial.println();
-    Serial.println("====================");
-    Serial.println("   SD CARD TEST");
-    Serial.println("====================");
+    Serial.println("NOVA starting...");
 
-    // Start SPI with the SD card pins
+    // Start SPI
     sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
 
-    Serial.println("Initializing SD card...");
-
+    // Initialize SD card
     if (!SD.begin(SD_CS, sdSPI)) {
-        Serial.println("❌ SD CARD FAILED!");
-        Serial.println("Check that the microSD card is inserted.");
+        Serial.println("SD card initialization failed!");
         return;
     }
 
-    Serial.println("✅ SD CARD INITIALIZED!");
+    Serial.println("SD card initialized.");
 
-    // Check card type
-    uint8_t cardType = SD.cardType();
-
-    if (cardType == CARD_NONE) {
-        Serial.println("❌ No SD card detected.");
+    // Check whether tasks.json already exists
+    if (SD.exists("/tasks.json")) {
+        Serial.println("tasks.json already exists.");
+        Serial.println("Leaving existing tasks untouched.");
         return;
     }
 
-    Serial.print("Card type: ");
+    // File doesn't exist, so create it
+    Serial.println("tasks.json does not exist.");
+    Serial.println("Creating tasks.json...");
 
-    if (cardType == CARD_MMC) {
-        Serial.println("MMC");
-    }
-    else if (cardType == CARD_SD) {
-        Serial.println("SDSC");
-    }
-    else if (cardType == CARD_SDHC) {
-        Serial.println("SDHC");
-    }
-    else {
-        Serial.println("UNKNOWN");
-    }
-
-    // Card size
-    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-
-    Serial.print("Card size: ");
-    Serial.print(cardSize);
-    Serial.println(" MB");
-
-    // Create a test file
-    File file = SD.open("/test.txt", FILE_WRITE);
+    File file = SD.open("/tasks.json", FILE_WRITE);
 
     if (!file) {
-        Serial.println("❌ Could not create test.txt");
+        Serial.println("Could not create tasks.json");
         return;
     }
 
-    file.println("Project NOVA SD card test!");
-    file.close();
+    file.println("{");
+    file.println("  \"tasks\": [");
 
-    Serial.println("✅ Created /test.txt");
+    file.println("    {");
+    file.println("      \"title\": \"Finish NOVA project\",");
+    file.println("      \"completed\": false");
+    file.println("    },");
 
-    // Read the file
-    file = SD.open("/test.txt");
+    file.println("    {");
+    file.println("      \"title\": \"Study physics\",");
+    file.println("      \"completed\": false");
+    file.println("    }");
 
-    if (!file) {
-        Serial.println("❌ Could not open test.txt");
-        return;
-    }
-
-    Serial.println("Contents of test.txt:");
-
-    while (file.available()) {
-        Serial.write(file.read());
-    }
+    file.println("  ]");
+    file.println("}");
 
     file.close();
 
-    Serial.println();
-    Serial.println("====================");
-    Serial.println("SD CARD TEST PASSED!");
-    Serial.println("====================");
+    Serial.println("tasks.json created successfully!");
 }
 
 void loop() {
