@@ -1,21 +1,27 @@
 #include <Arduino.h>
-#include <GxEPD2_BW.h>
-#include <Fonts/FreeMonoBold9pt7b.h>
 
-// LILYGO T3-S3 H727
-#define EPD_CS    15
-#define EPD_DC    16
-#define EPD_RST   47
-#define EPD_BUSY  48
+#include "utilities.h"
 
-// 2.13" 250x122 display
-GxEPD2_BW<GxEPD2_213_B74, GxEPD2_213_B74::HEIGHT> display(
-    GxEPD2_213_B74(
-        EPD_CS,
-        EPD_DC,
-        EPD_RST,
-        EPD_BUSY
-    )
+#include <SPI.h>
+#include <GxEPD.h>
+#include <GxIO/GxIO_SPI/GxIO_SPI.h>
+#include <GxDEPG0213BN/GxDEPG0213BN.h>
+
+#include <Fonts/FreeMonoBold12pt7b.h>
+
+SPIClass SDSPI(HSPI);
+
+GxIO_Class io(
+    SDSPI,
+    EDP_CS_PIN,
+    EDP_DC_PIN,
+    EDP_RSET_PIN
+);
+
+GxEPD_Class display(
+    io,
+    EDP_RSET_PIN,
+    EDP_BUSY_PIN
 );
 
 void setup()
@@ -23,30 +29,43 @@ void setup()
     Serial.begin(115200);
     delay(2000);
 
-    Serial.println("NOVA E-PAPER TEST");
+    Serial.println("NOVA DISPLAY TEST");
 
-    display.init(115200);
+    // Same SPI setup used by LILYGO
+    SDSPI.begin(
+        EDP_CLK_PIN,
+        EDP_MISO_PIN,
+        EDP_MOSI_PIN,
+        EDP_CS_PIN
+    );
 
-    display.setRotation(1);
-    display.setFont(&FreeMonoBold9pt7b);
+    Serial.println("SPI started.");
+
+    // Initialize display
+    display.init();
+
+    Serial.println("Display initialized.");
+
     display.setTextColor(GxEPD_BLACK);
 
-    display.setFullWindow();
-    display.firstPage();
+    // Use the same rotation as the official example
+    display.setRotation(2);
 
-    do
-    {
-        display.fillScreen(GxEPD_WHITE);
+    display.fillScreen(GxEPD_WHITE);
 
-        display.setCursor(20, 45);
-        display.print("PROJECT NOVA");
+    display.setFont(&FreeMonoBold12pt7b);
 
-        display.setCursor(20, 75);
-        display.print("DISPLAY WORKS!");
+    display.setCursor(10, 45);
+    display.println("PROJECT NOVA");
 
-    } while (display.nextPage());
+    display.setCursor(10, 80);
+    display.println("HELLO!");
 
-    Serial.println("Display update complete.");
+    Serial.println("Updating display...");
+
+    display.update();
+
+    Serial.println("Display update finished.");
 }
 
 void loop()
