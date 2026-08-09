@@ -1,15 +1,27 @@
 #include <Arduino.h>
+#include <SPI.h>
+#include <SD.h>
+#include <ArduinoJson.h>
 
 #include "utilities.h"
 
-#include <SPI.h>
 #include <GxEPD.h>
 #include <GxIO/GxIO_SPI/GxIO_SPI.h>
 #include <GxDEPG0213BN/GxDEPG0213BN.h>
 
-#include <Fonts/FreeMonoBold12pt7b.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
+
+
+// ========================================
+// SPI
+// ========================================
 
 SPIClass SDSPI(HSPI);
+
+
+// ========================================
+// E-PAPER
+// ========================================
 
 GxIO_Class io(
     SDSPI,
@@ -24,49 +36,246 @@ GxEPD_Class display(
     EDP_BUSY_PIN
 );
 
+
+// ========================================
+// SETUP
+// ========================================
+
 void setup()
 {
     Serial.begin(115200);
     delay(2000);
 
-    Serial.println("NOVA DISPLAY TEST");
+    Serial.println();
+    Serial.println("======================");
+    Serial.println(" PROJECT NOVA TASKS");
+    Serial.println("======================");
 
-    // Same SPI setup used by LILYGO
+
+    // ====================================
+    // START SPI
+    // ====================================
+
+    Serial.println("Starting SPI...");
+
     SDSPI.begin(
-        EDP_CLK_PIN,
-        EDP_MISO_PIN,
-        EDP_MOSI_PIN,
-        EDP_CS_PIN
+        SDCARD_SCLK,
+        SDCARD_MISO,
+        SDCARD_MOSI,
+        SDCARD_CS
     );
 
     Serial.println("SPI started.");
 
-    // Initialize display
+
+    // ====================================
+    // INITIALIZE DISPLAY
+    // ====================================
+
+    Serial.println("Initializing display...");
+
     display.init();
+
+    display.setRotation(3);
+    display.setTextColor(GxEPD_BLACK);
+    display.setFont(&FreeMonoBold9pt7b);
 
     Serial.println("Display initialized.");
 
-    display.setTextColor(GxEPD_BLACK);
 
-    // Use the same rotation as the official example
-    display.setRotation(2);
+    // ====================================
+    // IMPORTANT:
+    // DESELECT DISPLAY BEFORE SD ACCESS
+    // ====================================
+
+    pinMode(EDP_CS_PIN, OUTPUT);
+    digitalWrite(EDP_CS_PIN, HIGH);
+
+
+    // ====================================
+    // INITIALIZE SD CARD
+    // ====================================
+
+    Serial.println("Initializing SD card...");
+
+    pinMode(SDCARD_CS, OUTPUT);
+    digitalWrite(SDCARD_CS, HIGH);
+
+    if (!SD.begin(SDCARD_CS, SDSPI))
+    {
+        Serial.println("SD CARD FAILED!");
+
+        display.fillScreen(GxEPD_WHITE);
+
+        display.setCursor(10, 45);
+        display.println("SD CARD ERROR");
+
+        display.update();
+
+        return;
+    }
+
+    Serial.println("SD card initialized!");
+
+
+    // ====================================
+    // OPEN TASKS.JSON
+    // ====================================
+
+    File file = SD.open("/tasks.json");
+
+    if (!file)
+    {
+        Serial.println("Could not open tasks.json");
+
+        display.fillScreen(GxEPD_WHITE);
+
+        display.setCursor(10, 45);
+        display.println("TASK FILE ERROR");
+
+        display.update();
+
+        return;
+    }
+
+    Serial.println("tasks.json opened.");
+
+
+    // ====================================
+    // LOAD JSON INTO RAM
+    // ====================================
+
+    JsonDocument doc;
+
+    DeserializationError error = deserializeJson(doc, file);
+
+    file.close();
+
+    if (error)
+    {
+        Serial.print("JSON error: ");
+        Serial.println(error.c_str());
+
+        display.fillScreen(GxEPD_WHITE);
+
+        display.setCursor(10, 45);
+        display.println("JSON ERROR");
+
+        display.update();
+
+        return;
+    }
+
+    Serial.println("JSON loaded into RAM!");
+
+
+    // ====================================
+    // GET TASK ARRAY
+    // ====================================
+
+    JsonArray tasks = doc["tasks"];
+
+    int taskCount = tasks.size();
+
+    Serial.print("Tasks found: ");
+    Serial.println(taskCount);
+
+
+    // ====================================
+    // DRAW TASK PAGE
+    // ====================================
 
     display.fillScreen(GxEPD_WHITE);
 
-    display.setFont(&FreeMonoBold12pt7b);
+    // Title
+    display.setCursor(10, 18);
+    display.println("TASKS");
 
-    display.setCursor(10, 45);
-    display.println("PROJECT NOVA");
+    // Line underneath title
+    display.drawLine(
+        10,
+        23,
+        240,
+        23,
+        GxEPD_BLACK
+    );
 
-    display.setCursor(10, 80);
-    display.println("HELLO!");
+
+    // ====================================
+    // DRAW TASKS
+    // ====================================
+
+    int y = 43;
+
+    for (int i = 0; i < taskCount; i++)
+    {
+        const char* title = tasks[i]["title"];
+        bool completed = tasks[i]["completed"];
+
+
+        // Checkbox
+        display.drawRect(
+            10,
+            y - 10,
+            10,
+            10,
+            GxEPD_BLACK
+        );
+
+
+        // Draw X if completed
+        if (completed)
+        {
+            display.drawLine(
+                10,
+                y - 10,
+                20,
+                y,
+                GxEPD_BLACK
+            );
+
+            display.drawLine(
+                20,
+                y - 10,
+                10,
+                y,
+                GxEPD_BLACK
+            );
+        }
+
+
+        // Task title
+        display.setCursor(27, y);
+        display.println(title);
+
+
+        // Next task
+        y += 28;
+
+
+        // Don't draw outside the screen
+        if (y > 115)
+        {
+            break;
+        }
+    }
+
+
+    // ====================================
+    // UPDATE DISPLAY
+    // ====================================
 
     Serial.println("Updating display...");
 
     display.update();
 
-    Serial.println("Display update finished.");
+    Serial.println("Display updated!");
+
+    Serial.println("======================");
+    Serial.println("       COMPLETE");
+    Serial.println("======================");
 }
+
 
 void loop()
 {
