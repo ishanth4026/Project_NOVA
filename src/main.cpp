@@ -10,6 +10,7 @@
 #include <GxDEPG0213BN/GxDEPG0213BN.h>
 
 #include <Fonts/FreeMonoBold9pt7b.h>
+int BUTTON_PIN = 38;
 
 
 // ========================================
@@ -76,7 +77,7 @@ void setup()
 
     display.init();
 
-    display.setRotation(3);
+    display.setRotation(1);
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold9pt7b);
 
@@ -274,9 +275,29 @@ void setup()
     Serial.println("======================");
     Serial.println("       COMPLETE");
     Serial.println("======================");
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+    
 }
 
 
 void loop()
 {
+    static bool lastState = HIGH;
+    bool currentState = digitalRead(BUTTON_PIN);
+
+    // Only print when the state changes (avoids spamming Serial)
+    if (currentState != lastState)
+    {
+        if (currentState == LOW)
+        {
+            Serial.println("Button PRESSED");
+        }
+        else
+        {
+            Serial.println("Button RELEASED");
+        }
+
+        lastState = currentState;
+    }
 }
