@@ -2,24 +2,12 @@
 #include <SPI.h>
 #include <SD.h>
 #include <ArduinoJson.h>
-
-// --- E-Paper Libraries ---
 #include <GxEPD.h>
 #include <GxIO/GxIO_SPI/GxIO_SPI.h>
-#include <GxDEPG0213BN/GxDEPG0213BN.h> // 2.13" b/w display
-#include <Fonts/FreeMonoBold9pt7b.h>
+#include <GxDEPG0213BN/GxDEPG0213BN.h>
+#include <utilities.h> // LILYGO pin definitions
 
-// --- Pin Definitions ---
-#define EDP_BUSY_PIN  48
-#define EDP_RSET_PIN  47
-#define EDP_DC_PIN    16
-#define EDP_CS_PIN    15
-
-#define SDCARD_MOSI   11
-#define SDCARD_SCLK   14
-#define SDCARD_MISO   2
-#define SDCARD_CS     13
-
+// --- Encoder Pin Definitions ---
 #define ENCODER_CLK   39
 #define ENCODER_DT    40
 #define ENCODER_SW    38
@@ -29,27 +17,23 @@ SPIClass SDSPI(HSPI);
 GxIO_Class io(SDSPI, EDP_CS_PIN, EDP_DC_PIN, EDP_RSET_PIN);
 GxEPD_Class display(io, EDP_RSET_PIN, EDP_BUSY_PIN);
 
-// --- Task Data Structure (RAM) ---
-struct TaskItem {
-    String title;
-    bool completed;
-};
-
+// --- Task Data Structure ---
+struct TaskItem { String title; bool completed; };
 #define MAX_TASKS 10
 TaskItem taskList[MAX_TASKS];
 int totalTasks = 0;
 int selectedTaskIndex = 0;
 
-// --- Encoder State & Timers ---
+// --- State ---
 int lastStateCLK = HIGH;
 unsigned long lastButtonPress = 0;
-unsigned long lastEncoderChange = 0; 
+unsigned long lastEncoderChange = 0;
 
-// --- Function Prototypes ---
+// --- Prototypes ---
 void ensureTasksFile();
 void loadTasksToRAM();
 void saveTasksToSD();
-void drawAllTasks();
+void drawUI();
 void updateSelection(int oldIndex, int newIndex);
 void updateCheckbox(int index);
 
@@ -58,104 +42,81 @@ void setup() {
     delay(1000);
     Serial.println("\n--- PROJECT NOVA BOOTING ---");
 
-    // 1. Initialize Encoder Pins
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT, INPUT_PULLUP);
     pinMode(ENCODER_SW, INPUT_PULLUP);
-    lastStateCLK = digitalRead(ENCODER_CLK);
+    
+    // Secure SPI Bus Pins high on boot so nothing transmits early
+    pinMode(EDP_CS_PIN, OUTPUT); digitalWrite(EDP_CS_PIN, HIGH);
+    pinMode(SDCARD_CS, OUTPUT); digitalWrite(SDCARD_CS, HIGH);
 
-    // 2. SECURE THE SPI BUS FIRST
-    pinMode(EDP_CS_PIN, OUTPUT);
-    digitalWrite(EDP_CS_PIN, HIGH);
-    pinMode(SDCARD_CS, OUTPUT);
-    digitalWrite(SDCARD_CS, HIGH);
-
-    // 3. Initialize SPI Bus
+    // Initialize SPI bus exactly once
     SDSPI.begin(SDCARD_SCLK, SDCARD_MISO, SDCARD_MOSI, SDCARD_CS);
-
-    // 4. Initialize E-Paper
+    
     display.init();
-    display.setRotation(1); 
+    display.setRotation(1);
     display.setTextColor(GxEPD_BLACK);
-    display.setFont(&FreeMonoBold9pt7b);
-    display.fillScreen(GxEPD_WHITE);
+    display.setFont(); // Default small font
 
-    // 5. Initialize SD Card
-    if (!SD.begin(SDCARD_CS, SDSPI)) {
-        Serial.println("ERROR: SD CARD FAILED TO MOUNT!");
-        display.setCursor(10, 30);
-        display.print("SD Card Error!");
+    // Explicitly lock out the display before mounting the SD card
+    digitalWrite(EDP_CS_PIN, HIGH); 
+    
+    if (SD.begin(SDCARD_CS, SDSPI)) {
+        Serial.println("SD Card mounted successfully.");
+        ensureTasksFile();
+        loadTasksToRAM();
+    } else {
+        Serial.println("ERROR: SD Mount Failed");
+        display.fillScreen(GxEPD_WHITE);
+        display.setCursor(10, 10);
+        display.print("SD Mount Failed");
         display.update();
-        return; 
     }
-    Serial.println("SD CARD MOUNTED SUCCESSFULLY.");
-
-    // 6. Check JSON & Load Data
-    ensureTasksFile();
-    loadTasksToRAM();
 }
 
 void loop() {
-    // --- Rotary Encoder Polling (Scrolling) ---
+    // --- Scroll Logic ---
     int currentStateCLK = digitalRead(ENCODER_CLK);
-    
     if (currentStateCLK != lastStateCLK && currentStateCLK == LOW) {
         if (millis() - lastEncoderChange > 5) {
             int oldIndex = selectedTaskIndex;
-            
-            if (digitalRead(ENCODER_DT) != currentStateCLK) {
-                selectedTaskIndex--; // Scroll Up
-            } else {
-                selectedTaskIndex++; // Scroll Down
-            }
+            if (digitalRead(ENCODER_DT) != currentStateCLK) selectedTaskIndex--;
+            else selectedTaskIndex++;
             
             if (selectedTaskIndex < 0) selectedTaskIndex = 0;
             if (selectedTaskIndex >= totalTasks) selectedTaskIndex = totalTasks - 1;
             
-            if (oldIndex != selectedTaskIndex) {
-                updateSelection(oldIndex, selectedTaskIndex);
-            }
-            
+            if (oldIndex != selectedTaskIndex) updateSelection(oldIndex, selectedTaskIndex);
             lastEncoderChange = millis();
         }
     }
     lastStateCLK = currentStateCLK;
 
-    // --- Encoder Button Polling (Toggle Task) ---
-    if (digitalRead(ENCODER_SW) == LOW) {
-        if (millis() - lastButtonPress > 250) { // 250ms debounce
-            
-            // 1. Toggle state in RAM immediately
-            taskList[selectedTaskIndex].completed = !taskList[selectedTaskIndex].completed;
-            
-            Serial.print("Task '");
-            Serial.print(taskList[selectedTaskIndex].title);
-            Serial.print("' marked as ");
-            Serial.println(taskList[selectedTaskIndex].completed ? "COMPLETED" : "PENDING");
-            
-            // 2. Perform partial refresh IMMEDIATELY for instant visual feedback
-            updateCheckbox(selectedTaskIndex);
-            
-            // 3. Save to SD card instantly so it survives a power cut
-            saveTasksToSD();
-            
-            lastButtonPress = millis();
-        }
+    // --- Button Logic ---
+    if (digitalRead(ENCODER_SW) == LOW && (millis() - lastButtonPress > 250)) {
+        taskList[selectedTaskIndex].completed = !taskList[selectedTaskIndex].completed;
+        
+        // 1. Update the E-Paper display
+        updateCheckbox(selectedTaskIndex);
+        
+        // 2. Give the hardware a moment to settle
+        delay(50); 
+        
+        // 3. Save to SD Card
+        saveTasksToSD();
+        
+        lastButtonPress = millis();
     }
 }
-
-// --- Helper Functions ---
 
 void ensureTasksFile() {
     File file = SD.open("/tasks.json", FILE_READ);
     if (!file || file.size() == 0) {
         if (file) file.close();
-        Serial.println("tasks.json missing/empty. Generating default...");
         
         file = SD.open("/tasks.json", FILE_WRITE);
         if (file) {
-            const char* defaultJSON = "{\"tasks\":[{\"title\":\"Study\",\"completed\":false},{\"title\":\"Project NOVA\",\"completed\":false}]}";
-            file.print(defaultJSON);
+            file.print("{\"tasks\":[{\"title\":\"Study\",\"completed\":false},{\"title\":\"Project NOVA\",\"completed\":false}]}");
             file.flush();
             file.close();
         }
@@ -167,48 +128,48 @@ void ensureTasksFile() {
 void loadTasksToRAM() {
     File file = SD.open("/tasks.json", FILE_READ);
     if (!file) return;
-
+    
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
-    
+
     if (error) {
         Serial.print("JSON Parse Error: ");
         Serial.println(error.c_str());
         return;
     }
 
-    Serial.println("\n--- LOADING TASKS FROM SD CARD ---");
     totalTasks = 0;
     JsonArray tasks = doc["tasks"];
     for (JsonObject task : tasks) {
         if (totalTasks >= MAX_TASKS) break;
-        
         taskList[totalTasks].title = task["title"].as<String>();
         taskList[totalTasks].completed = task["completed"].as<bool>();
-        
-        // Diagnostic Print to prove what the SD card actually saved
-        Serial.print("Loaded Task: ");
-        Serial.print(taskList[totalTasks].title);
-        Serial.print(" -> Completed State: ");
-        Serial.println(taskList[totalTasks].completed ? "TRUE (Should draw X)" : "FALSE (Should be empty)");
-        
         totalTasks++;
     }
-    Serial.println("----------------------------------\n");
-    drawAllTasks();
+    drawUI();
 }
 
 void saveTasksToSD() {
-    Serial.println("\n--- SAVING TO SD CARD ---");
+    // 1. Force the display to let go of the SPI bus!
     digitalWrite(EDP_CS_PIN, HIGH);
+    delay(10);
+
+    // 2. NUCLEAR OPTION: Unmount the SD card completely to clear the coma
+    SD.end();
+    delay(20);
     
-    // BULLETPROOF FIX: Aggressively delete the old file so the ESP32 can't append to it
+    // 3. Wake it back up fresh
+    if (!SD.begin(SDCARD_CS, SDSPI)) {
+        Serial.println("ERROR: Failed to wake up SD card after E-Paper update!");
+        return;
+    }
+
+    // 4. Safely overwrite the file
     if (SD.exists("/tasks.json")) {
         SD.remove("/tasks.json");
-        Serial.println("Deleted old tasks.json");
     }
-    
+
     File file = SD.open("/tasks.json", FILE_WRITE);
     if (!file) {
         Serial.println("ERROR: Failed to open tasks.json for writing.");
@@ -217,79 +178,102 @@ void saveTasksToSD() {
 
     JsonDocument doc;
     JsonArray tasksArray = doc["tasks"].to<JsonArray>();
-    
     for (int i = 0; i < totalTasks; i++) {
         JsonObject taskObj = tasksArray.add<JsonObject>();
         taskObj["title"] = taskList[i].title;
         taskObj["completed"] = taskList[i].completed;
     }
-
-    if (serializeJson(doc, file) == 0) {
-        Serial.println("ERROR: Failed to write JSON to file.");
-    } else {
-        file.flush(); // Force hardware push
-        Serial.println("New tasks.json created and saved successfully!");
-    }
+    
+    serializeJson(doc, file);
+    file.flush();
     file.close();
-    Serial.println("--- SAVE COMPLETE ---\n");
+    
+    Serial.println("SD Card update successful. Survived the SPI coma!");
 }
 
-void drawAllTasks() {
+void drawUI() {
     display.fillScreen(GxEPD_WHITE);
-    
-    display.setCursor(20, 20);
+
+    // --- 1. Full Month Calendar View (Left Side) ---
+    display.setCursor(22, 5);
+    display.print("AUG 2026");
+    display.drawLine(5, 14, 115, 14, GxEPD_BLACK);
+
+    const char* daysOfWeek[7] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
+    int startX = 8;
+    int startY = 22;
+    int colW = 15;
+    int rowH = 12;
+
+    for (int i = 0; i < 7; i++) {
+        display.setCursor(startX + (i * colW), startY);
+        display.print(daysOfWeek[i]);
+    }
+    display.drawLine(5, 32, 115, 32, GxEPD_BLACK);
+
+    int startDayOffset = 6; // Aug 2026 starts on Saturday
+    startY = 36;
+
+    for (int d = 1; d <= 31; d++) {
+        int cellIndex = (d - 1) + startDayOffset;
+        int col = cellIndex % 7;
+        int row = cellIndex / 7;
+        
+        int x = startX + (col * colW);
+        int y = startY + (row * rowH);
+
+        if (d == 12) { // Highlight today
+            display.drawRect(x - 2, y - 8, 12, 11, GxEPD_BLACK);
+        }
+
+        display.setCursor(x, y);
+        if (d < 10) display.print(" ");
+        display.print(d);
+    }
+
+    display.drawLine(122, 0, 122, 122, GxEPD_BLACK);
+
+    // --- 2. Task List View (Right Side) ---
+    display.setCursor(135, 5);
     display.print("TASKS");
-    display.drawLine(20, 25, 210, 25, GxEPD_BLACK);
+    display.drawLine(135, 14, 240, 14, GxEPD_BLACK);
 
     for (int i = 0; i < totalTasks; i++) {
-        int yOffset = 50 + (i * 25);
+        int yOffset = 28 + (i * 18);
         
         if (i == selectedTaskIndex) {
-            display.setCursor(0, yOffset);
+            display.setCursor(125, yOffset);
             display.print(">");
         }
         
-        display.drawRect(20, yOffset - 12, 12, 12, GxEPD_BLACK);
-        
-        // THIS is the drawing logic that runs on boot.
+        display.drawRect(135, yOffset - 8, 9, 9, GxEPD_BLACK);
         if (taskList[i].completed) {
-            display.drawLine(20, yOffset - 12, 32, yOffset, GxEPD_BLACK);
-            display.drawLine(32, yOffset - 12, 20, yOffset, GxEPD_BLACK);
+            display.drawLine(135, yOffset - 8, 144, yOffset + 1, GxEPD_BLACK);
+            display.drawLine(144, yOffset - 8, 135, yOffset + 1, GxEPD_BLACK);
         }
         
-        display.setCursor(40, yOffset);
+        display.setCursor(150, yOffset);
         display.print(taskList[i].title);
     }
 
-    display.update(); 
+    display.update();
 }
 
 void updateSelection(int oldIndex, int newIndex) {
-    int topY = 50 - 16;  
-    int boxHeight = (totalTasks * 25); 
-
-    display.fillRect(0, topY, 16, boxHeight, GxEPD_WHITE);
-
-    int newY = 50 + (newIndex * 25);
-    display.setCursor(0, newY);
+    display.fillRect(125, 28 - 10, 10, (totalTasks * 18), GxEPD_WHITE);
+    int newY = 28 + (newIndex * 18);
+    display.setCursor(125, newY);
     display.print(">");
-
-    display.updateWindow(0, topY, 16, boxHeight);
+    display.updateWindow(125, 28 - 10, 10, (totalTasks * 18));
 }
 
 void updateCheckbox(int index) {
-    int yOffset = 50 + (index * 25);
-    int boxX = 20;
-    int boxY = yOffset - 12;
-    int boxSize = 12;
-
-    display.fillRect(boxX, boxY, boxSize, boxSize, GxEPD_WHITE);
-    display.drawRect(boxX, boxY, boxSize, boxSize, GxEPD_BLACK);
-    
+    int yOffset = 28 + (index * 18);
+    display.fillRect(135, yOffset - 8, 9, 9, GxEPD_WHITE);
+    display.drawRect(135, yOffset - 8, 9, 9, GxEPD_BLACK);
     if (taskList[index].completed) {
-        display.drawLine(boxX, boxY, boxX + boxSize, boxY + boxSize, GxEPD_BLACK);
-        display.drawLine(boxX + boxSize, boxY, boxX, boxY + boxSize, GxEPD_BLACK);
+        display.drawLine(135, yOffset - 8, 144, yOffset + 1, GxEPD_BLACK);
+        display.drawLine(144, yOffset - 8, 135, yOffset + 1, GxEPD_BLACK);
     }
-
-    display.updateWindow(boxX, boxY, boxSize, boxSize);
+    display.updateWindow(135, yOffset - 8, 9, 9);
 }
