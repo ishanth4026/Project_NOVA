@@ -60,22 +60,13 @@ void setup() {
 
     // Explicitly lock out the display before mounting the SD card
     digitalWrite(EDP_CS_PIN, HIGH); 
-    delay(50); // Let the bus settle
-    
-    // =========================================================================
-    // THE MAGIC FIX: 
-    // SD.begin(CS_PIN, SPI_BUS, FREQUENCY, MOUNT_POINT, MAX_FILES, FORMAT_IF_EMPTY)
-    // By passing 'true' at the very end, the ESP32 will auto-format the card 
-    // to clean FAT32 if it detects Error 13!
-    // =========================================================================
-    Serial.println("Mounting SD Card (Will auto-format if corrupted)...");
     
     if (SD.begin(SDCARD_CS, SDSPI, 4000000, "/sd", 5, true)) {
-        Serial.println("SUCCESS: SD Card mounted (and formatted if it was needed)!");
+        Serial.println("SD Card mounted successfully.");
         ensureTasksFile();
         loadTasksToRAM();
     } else {
-        Serial.println("CRITICAL ERROR: SD Mount/Format Failed entirely.");
+        Serial.println("ERROR: SD Mount Failed");
         display.fillScreen(GxEPD_WHITE);
         display.setCursor(10, 10);
         display.print("SD Mount Failed");
@@ -84,7 +75,7 @@ void setup() {
 }
 
 void loop() {
-    // --- Scroll Logic ---
+    // --- Scroll Logic (Using your exact working template) ---
     int currentStateCLK = digitalRead(ENCODER_CLK);
     if (currentStateCLK != lastStateCLK && currentStateCLK == LOW) {
         if (millis() - lastEncoderChange > 5) {
@@ -128,7 +119,6 @@ void ensureTasksFile() {
             file.print("{\"tasks\":[{\"title\":\"Study\",\"completed\":false},{\"title\":\"Project NOVA\",\"completed\":false}]}");
             file.flush();
             file.close();
-            Serial.println("Created fresh tasks.json file.");
         }
     } else {
         file.close();
@@ -165,12 +155,12 @@ void saveTasksToSD() {
     digitalWrite(EDP_CS_PIN, HIGH);
     delay(10);
 
-    // 2. Unmount the SD card completely to clear the coma
+    // 2. NUCLEAR OPTION: Unmount the SD card completely to clear the coma
     SD.end();
     delay(20);
     
-    // 3. Wake it back up fresh (No need to format here, just 4MHz safe speed)
-    if (!SD.begin(SDCARD_CS, SDSPI, 4000000)) {
+    // 3. Wake it back up fresh with full parameters
+    if (!SD.begin(SDCARD_CS, SDSPI, 4000000, "/sd", 5, true)) {
         Serial.println("ERROR: Failed to wake up SD card after E-Paper update!");
         return;
     }
@@ -204,65 +194,27 @@ void saveTasksToSD() {
 void drawUI() {
     display.fillScreen(GxEPD_WHITE);
 
-    // --- 1. Full Month Calendar View (Left Side) ---
-    display.setCursor(22, 5);
-    display.print("AUG 2026");
-    display.drawLine(5, 14, 115, 14, GxEPD_BLACK);
+    // --- Header ---
+    display.setCursor(15, 5);
+    display.print("PROJECT NOVA : TASKS");
+    display.drawLine(5, 14, 240, 14, GxEPD_BLACK);
 
-    const char* daysOfWeek[7] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
-    int startX = 8;
-    int startY = 22;
-    int colW = 15;
-    int rowH = 12;
-
-    for (int i = 0; i < 7; i++) {
-        display.setCursor(startX + (i * colW), startY);
-        display.print(daysOfWeek[i]);
-    }
-    display.drawLine(5, 32, 115, 32, GxEPD_BLACK);
-
-    int startDayOffset = 6; // Aug 2026 starts on Saturday
-    startY = 36;
-
-    for (int d = 1; d <= 31; d++) {
-        int cellIndex = (d - 1) + startDayOffset;
-        int col = cellIndex % 7;
-        int row = cellIndex / 7;
-        
-        int x = startX + (col * colW);
-        int y = startY + (row * rowH);
-
-        if (d == 12) { // Highlight today
-            display.drawRect(x - 2, y - 8, 12, 11, GxEPD_BLACK);
-        }
-
-        display.setCursor(x, y);
-        if (d < 10) display.print(" ");
-        display.print(d);
-    }
-
-    display.drawLine(122, 0, 122, 122, GxEPD_BLACK);
-
-    // --- 2. Task List View (Right Side) ---
-    display.setCursor(135, 5);
-    display.print("TASKS");
-    display.drawLine(135, 14, 240, 14, GxEPD_BLACK);
-
+    // --- Task List View (Shifted to Left Side, Full Screen Area) ---
     for (int i = 0; i < totalTasks; i++) {
         int yOffset = 28 + (i * 18);
         
         if (i == selectedTaskIndex) {
-            display.setCursor(125, yOffset);
+            display.setCursor(5, yOffset);
             display.print(">");
         }
         
-        display.drawRect(135, yOffset - 8, 9, 9, GxEPD_BLACK);
+        display.drawRect(15, yOffset - 8, 9, 9, GxEPD_BLACK);
         if (taskList[i].completed) {
-            display.drawLine(135, yOffset - 8, 144, yOffset + 1, GxEPD_BLACK);
-            display.drawLine(144, yOffset - 8, 135, yOffset + 1, GxEPD_BLACK);
+            display.drawLine(15, yOffset - 8, 24, yOffset + 1, GxEPD_BLACK);
+            display.drawLine(24, yOffset - 8, 15, yOffset + 1, GxEPD_BLACK);
         }
         
-        display.setCursor(150, yOffset);
+        display.setCursor(30, yOffset);
         display.print(taskList[i].title);
     }
 
@@ -270,20 +222,20 @@ void drawUI() {
 }
 
 void updateSelection(int oldIndex, int newIndex) {
-    display.fillRect(125, 28 - 10, 10, (totalTasks * 18), GxEPD_WHITE);
+    display.fillRect(0, 28 - 10, 12, (totalTasks * 18), GxEPD_WHITE);
     int newY = 28 + (newIndex * 18);
-    display.setCursor(125, newY);
+    display.setCursor(5, newY);
     display.print(">");
-    display.updateWindow(125, 28 - 10, 10, (totalTasks * 18));
+    display.updateWindow(0, 28 - 10, 12, (totalTasks * 18));
 }
 
 void updateCheckbox(int index) {
     int yOffset = 28 + (index * 18);
-    display.fillRect(135, yOffset - 8, 9, 9, GxEPD_WHITE);
-    display.drawRect(135, yOffset - 8, 9, 9, GxEPD_BLACK);
+    display.fillRect(15, yOffset - 8, 9, 9, GxEPD_WHITE);
+    display.drawRect(15, yOffset - 8, 9, 9, GxEPD_BLACK);
     if (taskList[index].completed) {
-        display.drawLine(135, yOffset - 8, 144, yOffset + 1, GxEPD_BLACK);
-        display.drawLine(144, yOffset - 8, 135, yOffset + 1, GxEPD_BLACK);
+        display.drawLine(15, yOffset - 8, 24, yOffset + 1, GxEPD_BLACK);
+        display.drawLine(24, yOffset - 8, 15, yOffset + 1, GxEPD_BLACK);
     }
-    display.updateWindow(135, yOffset - 8, 9, 9);
+    display.updateWindow(15, yOffset - 8, 9, 9);
 }
