@@ -75,7 +75,7 @@ void setup() {
 }
 
 void loop() {
-    // --- Scroll Logic (Using your exact working template) ---
+    // --- Scroll Logic ---
     int currentStateCLK = digitalRead(ENCODER_CLK);
     if (currentStateCLK != lastStateCLK && currentStateCLK == LOW) {
         if (millis() - lastEncoderChange > 5) {
@@ -155,7 +155,7 @@ void saveTasksToSD() {
     digitalWrite(EDP_CS_PIN, HIGH);
     delay(10);
 
-    // 2. NUCLEAR OPTION: Unmount the SD card completely to clear the coma
+    // 2. Unmount the SD card completely to clear the coma
     SD.end();
     delay(20);
     
@@ -188,6 +188,9 @@ void saveTasksToSD() {
     file.flush();
     file.close();
     
+    // 5. Give the physical SD card hardware time to flush its internal cache
+    delay(200); 
+    
     Serial.println("SD Card update successful. Survived the SPI coma!");
 }
 
@@ -195,23 +198,27 @@ void drawUI() {
     display.fillScreen(GxEPD_WHITE);
 
     // --- Header ---
-    display.setCursor(15, 5);
+    display.setCursor(15, 8);
     display.print("PROJECT NOVA : TASKS");
-    display.drawLine(5, 14, 240, 14, GxEPD_BLACK);
+    display.drawLine(5, 18, 240, 18, GxEPD_BLACK);
 
-    // --- Task List View (Shifted to Left Side, Full Screen Area) ---
+    // --- Task List View ---
+    int startY = 36;
+    int rowHeight = 24; 
+
     for (int i = 0; i < totalTasks; i++) {
-        int yOffset = 28 + (i * 18);
+        int yOffset = startY + (i * rowHeight);
         
         if (i == selectedTaskIndex) {
             display.setCursor(5, yOffset);
             display.print(">");
         }
         
-        display.drawRect(15, yOffset - 8, 9, 9, GxEPD_BLACK);
+        // Checkbox aligned cleanly with text
+        display.drawRect(15, yOffset, 8, 8, GxEPD_BLACK);
         if (taskList[i].completed) {
-            display.drawLine(15, yOffset - 8, 24, yOffset + 1, GxEPD_BLACK);
-            display.drawLine(24, yOffset - 8, 15, yOffset + 1, GxEPD_BLACK);
+            display.drawLine(15, yOffset, 23, yOffset + 7, GxEPD_BLACK);
+            display.drawLine(23, yOffset, 15, yOffset + 7, GxEPD_BLACK);
         }
         
         display.setCursor(30, yOffset);
@@ -222,20 +229,26 @@ void drawUI() {
 }
 
 void updateSelection(int oldIndex, int newIndex) {
-    display.fillRect(0, 28 - 10, 12, (totalTasks * 18), GxEPD_WHITE);
-    int newY = 28 + (newIndex * 18);
+    int startY = 36;
+    int rowHeight = 24;
+    
+    display.fillRect(0, startY - 10, 12, (totalTasks * rowHeight) + 10, GxEPD_WHITE);
+    int newY = startY + (newIndex * rowHeight);
     display.setCursor(5, newY);
     display.print(">");
-    display.updateWindow(0, 28 - 10, 12, (totalTasks * 18));
+    display.updateWindow(0, startY - 10, 12, (totalTasks * rowHeight) + 10);
 }
 
 void updateCheckbox(int index) {
-    int yOffset = 28 + (index * 18);
-    display.fillRect(15, yOffset - 8, 9, 9, GxEPD_WHITE);
-    display.drawRect(15, yOffset - 8, 9, 9, GxEPD_BLACK);
+    int startY = 36;
+    int rowHeight = 24;
+    int yOffset = startY + (index * rowHeight);
+    
+    display.fillRect(14, yOffset - 1, 10, 10, GxEPD_WHITE);
+    display.drawRect(15, yOffset, 8, 8, GxEPD_BLACK);
     if (taskList[index].completed) {
-        display.drawLine(15, yOffset - 8, 24, yOffset + 1, GxEPD_BLACK);
-        display.drawLine(24, yOffset - 8, 15, yOffset + 1, GxEPD_BLACK);
+        display.drawLine(15, yOffset, 23, yOffset + 7, GxEPD_BLACK);
+        display.drawLine(23, yOffset, 15, yOffset + 7, GxEPD_BLACK);
     }
-    display.updateWindow(15, yOffset - 8, 9, 9);
+    display.updateWindow(14, yOffset - 1, 10, 10);
 }
