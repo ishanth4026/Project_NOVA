@@ -60,13 +60,22 @@ void setup() {
 
     // Explicitly lock out the display before mounting the SD card
     digitalWrite(EDP_CS_PIN, HIGH); 
+    delay(50); // Let the bus settle
     
-    if (SD.begin(SDCARD_CS, SDSPI)) {
-        Serial.println("SD Card mounted successfully.");
+    // =========================================================================
+    // THE MAGIC FIX: 
+    // SD.begin(CS_PIN, SPI_BUS, FREQUENCY, MOUNT_POINT, MAX_FILES, FORMAT_IF_EMPTY)
+    // By passing 'true' at the very end, the ESP32 will auto-format the card 
+    // to clean FAT32 if it detects Error 13!
+    // =========================================================================
+    Serial.println("Mounting SD Card (Will auto-format if corrupted)...");
+    
+    if (SD.begin(SDCARD_CS, SDSPI, 4000000, "/sd", 5, true)) {
+        Serial.println("SUCCESS: SD Card mounted (and formatted if it was needed)!");
         ensureTasksFile();
         loadTasksToRAM();
     } else {
-        Serial.println("ERROR: SD Mount Failed");
+        Serial.println("CRITICAL ERROR: SD Mount/Format Failed entirely.");
         display.fillScreen(GxEPD_WHITE);
         display.setCursor(10, 10);
         display.print("SD Mount Failed");
@@ -119,6 +128,7 @@ void ensureTasksFile() {
             file.print("{\"tasks\":[{\"title\":\"Study\",\"completed\":false},{\"title\":\"Project NOVA\",\"completed\":false}]}");
             file.flush();
             file.close();
+            Serial.println("Created fresh tasks.json file.");
         }
     } else {
         file.close();
@@ -155,12 +165,12 @@ void saveTasksToSD() {
     digitalWrite(EDP_CS_PIN, HIGH);
     delay(10);
 
-    // 2. NUCLEAR OPTION: Unmount the SD card completely to clear the coma
+    // 2. Unmount the SD card completely to clear the coma
     SD.end();
     delay(20);
     
-    // 3. Wake it back up fresh
-    if (!SD.begin(SDCARD_CS, SDSPI)) {
+    // 3. Wake it back up fresh (No need to format here, just 4MHz safe speed)
+    if (!SD.begin(SDCARD_CS, SDSPI, 4000000)) {
         Serial.println("ERROR: Failed to wake up SD card after E-Paper update!");
         return;
     }
